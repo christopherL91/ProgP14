@@ -30,8 +30,10 @@ package main
 
 import (
 	"code.google.com/p/gcfg"
+	"encoding/gob"
 	"flag"
 	"fmt"
+	"github.com/wsxiaoys/terminal/color"
 	"net"
 	"os"
 	"os/signal"
@@ -54,8 +56,23 @@ type Config struct {
 }
 
 type client struct {
-	Config
-	conn net.Conn
+	*Config
+	conn *net.TCPConn
+}
+
+//Struct to hold an actual message beetween client and server.
+type Message struct {
+	Banner string
+	Body   string
+	Type   string
+}
+
+//Convinience function.
+func checkError(err error) {
+	if err != nil {
+		color.Printf("@{r}Fatal error: %s", err.Error())
+		os.Exit(1)
+	}
 }
 
 func init() {
@@ -70,12 +87,34 @@ func init() {
 	go func() {
 		<-c //blocking.
 		//inform server that I will quit.
-		fmt.Fprintln(os.Stderr, "Bye")
+		fmt.Fprintln(os.Stderr, "\nThank you for using a ATM from Unicorn INC")
 		os.Exit(1) //will just quit client if user pressed CTRL - C
 	}() //Execute goroutine
 }
 
 func main() {
-	//create a new client.
-	client := new(client)
+	//			Config area.
+	/*---------------------------------------------------*/
+	client := &client{Config: new(Config)}
+	var address string //holds the address to the server.
+	var port string    //holds the port to the server.
+
+	err := gcfg.ReadFileInto(client.Config, configPath)
+	checkError(err)
+	address = client.Config.Client.Address
+	port = client.Config.Client.Port
+	address += ":" + port
+	/*---------------------------------------------------*/
+
+	//			Connection area
+	/*---------------------------------------------------*/
+	tcpAddr, err := net.ResolveTCPAddr("tcp4", address)
+	checkError(err)
+	client.conn, err = net.DialTCP("tcp4", nil, tcpAddr)
+	checkError(err)
+	// encoder := gob.NewEncoder(conn)
+	decoder := gob.NewDecoder(client.conn)
+	message := new(Message)
+	decoder.Decode(message) //blocking while wating for message.
+	color.Printf("@{b}Message: %s\n", message)
 }

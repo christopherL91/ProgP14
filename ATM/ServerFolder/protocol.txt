@@ -1,0 +1,7 @@
+Network protocol.
+
+Message:
+
+Type: login,transaction, balance
+User: name
+code: password

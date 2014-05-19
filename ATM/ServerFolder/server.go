@@ -24,6 +24,7 @@ package main
 
 import (
 	"code.google.com/p/gcfg"
+	"encoding/gob"
 	"flag"
 	"github.com/wsxiaoys/terminal/color"
 	"net"
@@ -41,7 +42,7 @@ var (
 	prompt     = "Unicorn@ATM>"
 	version    = 1.0
 	author     = "Christopher Lillthors. Unicorn INC"
-	width      = 80
+	width      = 80 //maximum content length.
 )
 
 //Struct to hold all the configurations.
@@ -50,6 +51,13 @@ type Config struct {
 		Address string
 		Port    string
 	}
+}
+
+//Struct to hold an actual message beetween client and server.
+type Message struct {
+	Banner string
+	Body   string
+	Type   string
 }
 
 /*---------------------------------------------------*/
@@ -67,7 +75,7 @@ type client struct {
 type server struct {
 	clients []*client
 	mutex   *sync.Mutex
-	menus   map[string]menu
+	menus   map[string]*menu
 }
 
 /*---------------------------------------------------*/
@@ -107,11 +115,17 @@ func newServer() *server {
 	return &server{
 		clients: []*client{},
 		mutex:   new(sync.Mutex),
-		menus:   make(map[string]menu),
+		menus:   make(map[string]*menu),
 	}
 }
 
-func (s *server) addMenu(name string, m menu) {
+func (s *server) getMenu(name string) *menu {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.menus[name]
+}
+
+func (s *server) addMenu(name string, m *menu) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.menus[name] = m
@@ -129,16 +143,28 @@ func (s *server) addClient(c *client) {
 	s.clients = append(s.clients, c)
 }
 
+func (s *server) composeGreeting() *Message {
+	return &Message{
+		Type:   "Greeting",
+		Banner: banner,
+	}
+}
+
 /*---------------------------------------------------*/
 
-func newClient(conn net.Conn) {
+//Handle every new connection here.
+func (s *server) newClient(conn net.Conn) {
+	defer conn.Close()
 	color.Printf("@{c}New Client connected with IP %s\n", conn.RemoteAddr().String())
+	encoder := gob.NewEncoder(conn)
+	err := encoder.Encode(s.composeGreeting())
+	checkError(err)
 }
 
 //Convinience function.
 func checkError(err error) {
 	if err != nil {
-		color.Printf("@{r}Fatal error %s", err.Error())
+		color.Printf("@{r}Fatal error: %s", err.Error())
 		os.Exit(1)
 	}
 }
@@ -152,12 +178,12 @@ func init() {
 
 func main() {
 	/*---------------------------------------------------*/
-	config := new(Config)
-	var address string
-	var port string
-	color.Println("\t\t\t\t@{b}ATM started")
-	color.Println("@{g}Reading config file...")
-	err := gcfg.ReadFileInto(config, configPath)
+	config := new(Config)                        //new config struct.
+	var address string                           //holds the address to the server.
+	var port string                              //holds the port to the server.
+	color.Println("\t\t\t\t@{b}ATM started")     //Print out with colors.
+	color.Println("@{g}Reading config file...")  //Print out with colors.
+	err := gcfg.ReadFileInto(config, configPath) //Read config file.
 	checkError(err)
 	color.Println("@{g}Config read OK")
 	address = config.Server.Address
@@ -167,8 +193,8 @@ func main() {
 	/*---------------------------------------------------*/
 	/*Setup area. create a new server*/
 	server := newServer()
-	server.addMenu("Swedish", swedish)
-	server.addMenu("English", english)
+	server.addMenu("Swedish", &swedish)
+	server.addMenu("English", &english)
 
 	address += ":" + port
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", address)
@@ -183,7 +209,7 @@ func main() {
 			//Don't let one bad connection bring you down.
 			continue
 		}
-		go newClient(conn)
+		go server.newClient(conn) //connection handler for every new connection.
 	}
 	/*---------------------------------------------------*/
 }
