@@ -101,6 +101,8 @@ var (
 
 /*---------------------------------------------------*/
 
+//			Server area
+/*---------------------------------------------------*/
 func newServer() *server {
 	return &server{
 		clients: make(map[*client]bool),
@@ -127,6 +129,9 @@ func (s *server) addClient(c *client) {
 	s.clients[c] = true
 }
 
+/*---------------------------------------------------*/
+
+//Convinience function.
 func checkError(err error) {
 	if err != nil {
 		color.Printf("@{r}Fatal error %s", err.Error())
@@ -138,6 +143,7 @@ func init() {
 	//For configurations.
 	flag.StringVar(&configPath, "config", "server.gcfg", "Path to config file")
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	flag.Parse()
 }
 
 func main() {
