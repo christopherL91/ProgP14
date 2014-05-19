@@ -65,7 +65,7 @@ type client struct {
 }
 
 type server struct {
-	clients map[*client]bool //For fast checkup if the client is connected.
+	clients []*client
 	mutex   *sync.Mutex
 	menus   map[string]menu
 }
@@ -105,7 +105,7 @@ var (
 /*---------------------------------------------------*/
 func newServer() *server {
 	return &server{
-		clients: make(map[*client]bool),
+		clients: []*client{},
 		mutex:   new(sync.Mutex),
 		menus:   make(map[string]menu),
 	}
@@ -126,7 +126,7 @@ func (s *server) numOfMenus() int {
 func (s *server) addClient(c *client) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	s.clients[c] = true
+	s.clients = append(s.clients, c)
 }
 
 /*---------------------------------------------------*/
