@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"time"
+	"runtime"
 )
 
 //A convenience type.
@@ -86,6 +87,10 @@ func checkError(err error) {
 		fmt.Fprintf(os.Stderr, "Fatal error: %s", err.Error())
 		os.Exit(1)
 	}
+}
+
+func init() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
 }
 
 func main() {
