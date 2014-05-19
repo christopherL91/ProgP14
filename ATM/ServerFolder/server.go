@@ -142,8 +142,8 @@ func checkError(err error) {
 func init() {
 	//For configurations.
 	flag.StringVar(&configPath, "config", "server.gcfg", "Path to config file")
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	flag.Parse()
+	runtime.GOMAXPROCS(runtime.NumCPU()) //Use maximal number of cores.
+	flag.Parse()                         //Parse the actual string.
 }
 
 func main() {
