@@ -58,6 +58,7 @@ type Message struct {
 	Banner string
 	Body   string
 	Type   string
+	Menu   *menu
 }
 
 /*---------------------------------------------------*/
@@ -147,6 +148,7 @@ func (s *server) composeGreeting() *Message {
 	return &Message{
 		Type:   "Greeting",
 		Banner: banner,
+		Menu:   s.getMenu("swedish"),
 	}
 }
 
@@ -202,7 +204,7 @@ func main() {
 
 	ln, err := net.ListenTCP("tcp", tcpAddr)
 	checkError(err)
-	color.Printf("@{g}Listening on %s\n", address)
+	color.Printf("@{g}Listening on %s\n\n", address)
 	for {
 		conn, err := ln.Accept()
 		if err != nil {

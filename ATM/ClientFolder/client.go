@@ -65,6 +65,7 @@ type Message struct {
 	Banner string
 	Body   string
 	Type   string
+	Menu   []string
 }
 
 //Convinience function.
@@ -112,9 +113,25 @@ func main() {
 	checkError(err)
 	client.conn, err = net.DialTCP("tcp4", nil, tcpAddr)
 	checkError(err)
-	// encoder := gob.NewEncoder(conn)
+	//listen to and decode messages from server.
 	decoder := gob.NewDecoder(client.conn)
-	message := new(Message)
-	decoder.Decode(message) //blocking while wating for message.
-	color.Printf("@{b}Message: %s\n", message)
+
+	readMessages := func(decoder *gob.Decoder) {
+		message := new(Message)
+		for {
+			decoder.Decode(message) //blocking
+			switch message.Type {
+			case "Greeting":
+				color.Printf("@{g}Banner", message.Banner)
+				for _, item := range message.Menu {
+					color.Println(item)
+				}
+			default:
+				color.Println("@{r}Unkown message from server")
+			}
+		}
+	}
+
+	go readMessages(decoder) //start new goroutine and listen to messages.
+	select {}
 }
