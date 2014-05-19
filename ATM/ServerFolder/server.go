@@ -4,6 +4,7 @@ package main
 
 import (
 	// "fmt"
+	"code.google.com/p/gcfg"
 	"net"
 	"sync"
 	"time"
@@ -14,12 +15,14 @@ type menu []string
 
 type client struct {
 	conn    net.Conn
-	balance map[int]int
+	id int
+	
 }
 
 type server struct {
-	mutex *sync.Mutex
-	menus map[string]menu
+	clients []client
+	mutex   *sync.Mutex
+	menus   map[string]menu
 }
 
 /*---------------------------------------------------*/
@@ -57,6 +60,7 @@ const (
 
 func newServer() *server {
 	return &server{
+		clients: make([]client,1)
 		mutex: new(sync.Mutex),
 		menus: make(map[string]menu, 2),
 	}
@@ -72,6 +76,10 @@ func (s *server) numOfMenus() int {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	return len(s.menus)
+}
+
+func (s *server) addClient() {
+	
 }
 func checkError(err error) {
 	if err != nil {
