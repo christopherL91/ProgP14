@@ -29,6 +29,7 @@
 package main
 
 import (
+	"bufio"
 	"code.google.com/p/gcfg"
 	"encoding/gob"
 	"flag"
@@ -37,12 +38,13 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 )
 
 //Configuration stuff.
 var (
 	configPath string
-	prompt     = "Unicorn@ATM>"
+	prompt     = "Unicorn@ATM> "
 	version    = 1.0
 	author     = "Christopher Lillthors. Unicorn INC"
 )
@@ -60,12 +62,14 @@ type client struct {
 	conn *net.TCPConn
 }
 
+type menu map[string][]string
+
 //Struct to hold an actual message beetween client and server.
 type Message struct {
 	Banner string
 	Body   string
 	Type   string
-	Menu   []string
+	Menu   menu
 }
 
 //Convinience function.
@@ -79,24 +83,18 @@ func checkError(err error) {
 func init() {
 	//For configurations.
 	flag.StringVar(&configPath, "config", "client.gcfg", "Path to config file")
+	flag.Parse()
+}
 
+func main() {
 	//For UNIX signal handling.
 	c := make(chan os.Signal, 1)   //A channel to listen on keyboard events.
 	signal.Notify(c, os.Interrupt) //If user pressed CTRL - C.
 
-	//A goroutine to check for keyboard events.
-	go func() {
-		<-c //blocking.
-		//inform server that I will quit.
-		fmt.Fprintln(os.Stderr, "\nThank you for using a ATM from Unicorn INC")
-		os.Exit(1) //will just quit client if user pressed CTRL - C
-	}() //Execute goroutine
-}
-
-func main() {
 	//			Config area.
 	/*---------------------------------------------------*/
 	client := &client{Config: new(Config)}
+
 	var address string //holds the address to the server.
 	var port string    //holds the port to the server.
 
@@ -113,25 +111,42 @@ func main() {
 	checkError(err)
 	client.conn, err = net.DialTCP("tcp4", nil, tcpAddr)
 	checkError(err)
-	//listen to and decode messages from server.
-	decoder := gob.NewDecoder(client.conn)
 
-	readMessages := func(decoder *gob.Decoder) {
-		message := new(Message)
-		for {
-			decoder.Decode(message) //blocking
-			switch message.Type {
-			case "Greeting":
-				color.Printf("@{g}Banner", message.Banner)
-				for _, item := range message.Menu {
-					color.Println(item)
-				}
-			default:
-				color.Println("@{r}Unkown message from server")
-			}
+	//A goroutine to check for keyboard events.
+	go func() {
+		defer os.Exit(1) //will just quit client if user pressed CTRL - C
+		<-c              //blocking.
+		client.conn.Close()
+		fmt.Fprintln(os.Stderr, "\nThank you for using a ATM from Unicorn INC")
+	}() //Execute goroutine
+
+	menuCh := make(chan *Message)
+	reader := bufio.NewReader(os.Stdin)
+	writer := bufio.NewWriter(client.conn)
+	go client.listen(client.conn, menuCh)
+
+	menus := <-menuCh
+	for key, value := range menus.Menu {
+		fmt.Println(key)
+		for _, item := range value {
+			fmt.Println(item)
 		}
 	}
 
-	go readMessages(decoder) //start new goroutine and listen to messages.
-	select {}
+	for {
+		fmt.Print(prompt)
+		line, _ := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		writer.Write([]byte(line))
+	}
+}
+
+func (c *client) listen(conn net.Conn, ch chan<- *Message) {
+	message := new(Message)
+	err := gob.NewDecoder(conn).Decode(message)
+	ch <- message
+	checkError(err)
 }
