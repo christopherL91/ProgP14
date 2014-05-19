@@ -3,12 +3,19 @@ package main
 //ATM server.
 
 import (
+	// "fmt"
+	"net"
 	"sync"
 	"time"
 )
 
 //A convenience type.
 type menu []string
+
+type client struct {
+	conn    net.Conn
+	balance map[int]int
+}
 
 type server struct {
 	mutex *sync.Mutex
@@ -66,10 +73,18 @@ func (s *server) numOfMenus() int {
 	defer s.mutex.Unlock()
 	return len(s.menus)
 }
+func checkError(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Fatal error: %s", err.Error())
+		os.Exit(1)
+	}
+}
 
 func main() {
-	//create a new server
+	/*---------------------------------------------------*/
+	/*Setup area. create a new server*/
 	server := newServer()
 	server.addMenu("Swedish", swedish)
 	server.addMenu("English", english)
+	/*---------------------------------------------------*/
 }
