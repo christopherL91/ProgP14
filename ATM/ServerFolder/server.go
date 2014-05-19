@@ -131,6 +131,10 @@ func (s *server) addClient(c *client) {
 
 /*---------------------------------------------------*/
 
+func newClient(conn net.Conn) {
+	color.Printf("@{c}New Client connected with IP %s\n", conn.RemoteAddr().String())
+}
+
 //Convinience function.
 func checkError(err error) {
 	if err != nil {
@@ -149,11 +153,15 @@ func init() {
 func main() {
 	/*---------------------------------------------------*/
 	config := new(Config)
+	var address string
+	var port string
 	color.Println("\t\t\t\t@{b}ATM started")
 	color.Println("@{g}Reading config file...")
 	err := gcfg.ReadFileInto(config, configPath)
 	checkError(err)
 	color.Println("@{g}Config read OK")
+	address = config.Server.Address
+	port = config.Server.Port
 	/*---------------------------------------------------*/
 
 	/*---------------------------------------------------*/
@@ -161,5 +169,21 @@ func main() {
 	server := newServer()
 	server.addMenu("Swedish", swedish)
 	server.addMenu("English", english)
+
+	address += ":" + port
+	tcpAddr, err := net.ResolveTCPAddr("tcp4", address)
+	checkError(err)
+
+	ln, err := net.ListenTCP("tcp", tcpAddr)
+	checkError(err)
+	color.Printf("@{g}Listening on %s\n", address)
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			//Don't let one bad connection bring you down.
+			continue
+		}
+		go newClient(conn)
+	}
 	/*---------------------------------------------------*/
 }
