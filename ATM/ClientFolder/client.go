@@ -20,12 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/*
-	TODO:
-	Read configurations from file.
-	Make contact with server.
-*/
-
 package main
 
 import (
@@ -34,6 +28,7 @@ import (
 	"encoding/gob"
 	"flag"
 	"fmt"
+	"github.com/christopherL91/Protocol"
 	"github.com/wsxiaoys/terminal/color"
 	"net"
 	"os"
@@ -62,21 +57,13 @@ type client struct {
 	conn *net.TCPConn
 }
 
-type menu map[string][]string
+func (c *client) listen(conn net.Conn) {
+	menuconfig := new(Protocol.MenuConfig)
+	err := gob.NewDecoder(conn).Decode(menuconfig)
+	checkError(err)
 
-//Struct to hold an actual message beetween client and server.
-type Message struct {
-	Banner string
-	Body   string
-	Type   string
-	Menu   menu
-}
-
-//Convinience function.
-func checkError(err error) {
-	if err != nil {
-		color.Printf("@{r}Fatal error: %s", err.Error())
-		os.Exit(1)
+	for _, menus := range menuconfig.Menus {
+		fmt.Println(strings.Join(menus.Menu, "\n"))
 	}
 }
 
@@ -114,24 +101,14 @@ func main() {
 
 	//A goroutine to check for keyboard events.
 	go func() {
-		defer os.Exit(1) //will just quit client if user pressed CTRL - C
 		<-c              //blocking.
+		defer os.Exit(1) //will just quit client if user pressed CTRL - C
 		client.conn.Close()
 		fmt.Fprintln(os.Stderr, "\nThank you for using a ATM from Unicorn INC")
 	}() //Execute goroutine
 
-	menuCh := make(chan *Message)
 	reader := bufio.NewReader(os.Stdin)
-	writer := bufio.NewWriter(client.conn)
-	go client.listen(client.conn, menuCh)
-
-	menus := <-menuCh
-	for key, value := range menus.Menu {
-		fmt.Println(key)
-		for _, item := range value {
-			fmt.Println(item)
-		}
-	}
+	go client.listen(client.conn)
 
 	for {
 		fmt.Print(prompt)
@@ -140,13 +117,13 @@ func main() {
 		if line == "" {
 			continue
 		}
-		writer.Write([]byte(line))
 	}
 }
 
-func (c *client) listen(conn net.Conn, ch chan<- *Message) {
-	message := new(Message)
-	err := gob.NewDecoder(conn).Decode(message)
-	ch <- message
-	checkError(err)
+//Convinience function.
+func checkError(err error) {
+	if err != nil {
+		color.Printf("@{r}Fatal error: %s", err.Error())
+		os.Exit(1)
+	}
 }

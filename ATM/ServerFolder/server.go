@@ -26,26 +26,20 @@ import (
 	"bufio"
 	"code.google.com/p/gcfg"
 	"encoding/gob"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/christopherL91/Protocol"
 	"github.com/wsxiaoys/terminal/color"
+	"io/ioutil"
 	"net"
 	"os"
 	"runtime"
-	"sync"
-	"time"
+	// "strings"
 )
 
 //			Config
 /*---------------------------------------------------*/
-//Configuration stuff.
-var (
-	configPath string
-	prompt     = "Unicorn@ATM>"
-	version    = 1.0
-	author     = "Christopher Lillthors. Unicorn INC"
-	width      = 80 //maximum content length.
-)
 
 //Struct to hold all the configurations.
 type Config struct {
@@ -55,109 +49,58 @@ type Config struct {
 	}
 }
 
-/*---------------------------------------------------*/
-
-//			Server/Client
-/*---------------------------------------------------*/
-type client struct {
-	conn *net.TCPConn
-	id   int
-}
-
-type server struct {
-	clients []*client //contains all the clients.
-	mutex   *sync.Mutex
-}
-
-//A convenience type.
-type menu map[string][]string
-
-//Struct to hold an actual message beetween client and server.
-type Message struct {
-	Banner string
-	Body   string
-	Type   string
-	Menu   menu
-}
-
-/*---------------------------------------------------*/
-
-//			Configure for your own good.
-/*---------------------------------------------------*/
-/*Everything here will be sent  to the client.*/
-var (
-	banner = "UNICORN INC\n" //Corporate banner.
-	menus  = menu{
-		"swedish": {
-			".................................................", //Starting of menu
-			banner,
-			"Time " + time.Now().String() + "\n",
-			"1) Logga in",
-			"2) Kontakta oss",
-			".................................................", //End of menu
-		},
-		"english": {
-			".................................................", //Starting of menu
-			banner,
-			"Time " + time.Now().String() + "\n",
-			"1) Log in",
-			"2) Contact us",
-			".................................................", //End of menu
-		},
-	}
-)
+var configPath string
 
 /*---------------------------------------------------*/
 
 //			Server area
 /*---------------------------------------------------*/
-func newServer() *server {
-	return &server{
-		clients: []*client{},
-		mutex:   new(sync.Mutex),
-	}
-}
 
 //Handle every new connection here.
-func (s *server) newClient(conn net.Conn) {
+func connectionHandler(conn net.Conn) {
+	//read menu and pass it to the client.
+	defer conn.Close()
 	color.Printf("@{c}New Client connected with IP %s\n", conn.RemoteAddr().String())
-	encoder := gob.NewEncoder(conn)
-	err := encoder.Encode(&Message{
-		Type: "Greeting",
-		Menu: menus,
-	})
+
+	menuconfig := Protocol.MenuConfig{}
+	data, err := ioutil.ReadFile("menus.json")
+	checkError(err)
+	err = json.Unmarshal(data, &menuconfig.Menus)
+	checkError(err)
+
+	// fmt.Println(strings.Join(menus["swedish"].Menu, "\n"))
+	err = gob.NewEncoder(conn).Encode(menuconfig)
 	checkError(err)
 
 	go listen(conn)
 
-	select {}
+	for {
+		select {
+		// case data := <-listenCh:
+		// 	//data came in. Do something about it.
+		}
+	} //blocking.
 }
 
 func listen(conn net.Conn) {
 	scanner := bufio.NewScanner(conn)
+	var buffer string
 	for scanner.Scan() {
-		fmt.Println(scanner.Text())
+		buffer = scanner.Text()
+		fmt.Println(buffer)
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Println("ERROR")
 		conn.Close()
-	}
-}
-
-//Convinience function.
-func checkError(err error) {
-	if err != nil {
-		color.Printf("@{r}Fatal error: %s", err.Error())
-		os.Exit(1)
+		checkError(err)
 	}
 }
 
 func init() {
 	//For configurations.
 	flag.StringVar(&configPath, "config", "server.gcfg", "Path to config file")
-	runtime.GOMAXPROCS(runtime.NumCPU()) //Use maximal number of cores.
 	flag.Parse()                         //Parse the actual string.
+	runtime.GOMAXPROCS(runtime.NumCPU()) //Use maximal number of cores.
 }
 
 func main() {
@@ -174,24 +117,28 @@ func main() {
 	port = config.Server.Port
 	/*---------------------------------------------------*/
 
-	/*---------------------------------------------------*/
-	/*Setup area. create a new server*/
-	server := newServer()
-
 	address += ":" + port
 	tcpAddr, err := net.ResolveTCPAddr("tcp4", address)
 	checkError(err)
 
-	ln, err := net.ListenTCP("tcp", tcpAddr)
+	listener, err := net.ListenTCP("tcp", tcpAddr)
 	checkError(err)
 	color.Printf("@{g}Listening on %s\n\n", address)
+
 	for {
-		conn, err := ln.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
 			//Don't let one bad connection bring you down.
 			continue
 		}
-		go server.newClient(conn) //connection handler for every new connection.
+		go connectionHandler(conn) //connection handler for every new connection.
 	}
-	/*---------------------------------------------------*/
+}
+
+//Convinience function.
+func checkError(err error) {
+	if err != nil {
+		color.Printf("@{r}Fatal error: %s", err.Error())
+		os.Exit(1)
+	}
 }
