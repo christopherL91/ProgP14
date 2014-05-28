@@ -39,9 +39,9 @@ import (
 //Configuration stuff.
 var (
 	configPath string
-	prompt     = "Unicorn@ATM> "
-	version    = 1.0
-	author     = "Christopher Lillthors. Unicorn INC"
+	prompt             = "Unicorn@ATM> "
+	version    float32 = 1.5
+	author             = "Christopher Lillthors. Unicorn INC"
 )
 
 //Struct to hold all the configurations.
@@ -57,13 +57,46 @@ type client struct {
 	conn *net.TCPConn
 }
 
-func (c *client) listen(conn net.Conn) {
+func (c *client) listen(conn net.Conn, input chan string) {
+	color.Println("@{g}Downloading config files...")
+	var counter int //to increment the menu options.
 	menuconfig := new(Protocol.MenuConfig)
 	err := gob.NewDecoder(conn).Decode(menuconfig)
 	checkError(err)
+	color.Println("@{g}Config files downloaded\n")
 
-	for _, menus := range menuconfig.Menus {
-		fmt.Println(strings.Join(menus.Menu, "\n"))
+	color.Println("\t\t\t\t@{b}Choose language")
+
+	//print out the different languages you can choose on the screen.
+	for language, _ := range menuconfig.Menus {
+		counter += 1
+		color.Printf("@{g} %d) %s\n", counter, language)
+	}
+
+	//User chooses languages.
+	for {
+		fmt.Print(prompt)
+		menu, ok := menuconfig.Menus[<-input]
+		if !ok {
+			color.Println("@{r}Invalid input. Please try again")
+		} else {
+			fmt.Println(strings.Join(menu.Menu, "\n"))
+			break
+		}
+	}
+
+	//User makes more options.
+Outer:
+	for {
+		fmt.Print(prompt)
+		switch <-input {
+		case "1":
+			break Outer //Break outer for loop.
+		case "2":
+			color.Printf("@{b}Version:%f\nAuthor:%s\n", version, author)
+		default:
+			color.Println("@{r}Invalid input. Please try again")
+		}
 	}
 }
 
@@ -106,17 +139,19 @@ func main() {
 		client.conn.Close()
 		fmt.Fprintln(os.Stderr, "\nThank you for using a ATM from Unicorn INC")
 	}() //Execute goroutine
-
+	inputCh := make(chan string)
 	reader := bufio.NewReader(os.Stdin)
-	go client.listen(client.conn)
+
+	go client.listen(client.conn, inputCh)
 
 	for {
-		fmt.Print(prompt)
+		// fmt.Print(prompt)
 		line, _ := reader.ReadString('\n')
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
+		inputCh <- line
 	}
 }
 
