@@ -39,9 +39,9 @@ import (
 //Configuration stuff.
 var (
 	configPath string
-	prompt             = "Unicorn@ATM> "
-	version    float32 = 1.5
-	author             = "Christopher Lillthors. Unicorn INC"
+	prompt     = "Unicorn@ATM> "
+	version    = 1.5
+	author     = "Christopher Lillthors. Unicorn INC"
 )
 
 //Struct to hold all the configurations.
@@ -60,6 +60,7 @@ type client struct {
 func (c *client) listen(conn net.Conn, input chan string) {
 	color.Println("@{g}Downloading config files...")
 	var counter int //to increment the menu options.
+	var language string
 	menuconfig := new(Protocol.MenuConfig)
 	err := gob.NewDecoder(conn).Decode(menuconfig)
 	checkError(err)
@@ -73,29 +74,60 @@ func (c *client) listen(conn net.Conn, input chan string) {
 		color.Printf("@{g} %d) %s\n", counter, language)
 	}
 
+	//  1) swedish
+	// 2) english
+
 	//User chooses languages.
 	for {
 		fmt.Print(prompt)
-		menu, ok := menuconfig.Menus[<-input]
+		language = <-input
+		menu, ok := menuconfig.Menus[language]
 		if !ok {
-			color.Println("@{r}Invalid input. Please try again")
+			color.Printf("@{r}%s\n", "Invalid input")
 		} else {
 			fmt.Println(strings.Join(menu.Menu, "\n"))
 			break
 		}
 	}
 
-	//User makes more options.
-Outer:
+	// ".................................................",
+	// 		"UNICORN INC",
+	// 		"1) Log in",
+	// 		"2) Contact us",
+	// 		"................................................."
+K:
 	for {
 		fmt.Print(prompt)
 		switch <-input {
 		case "1":
-			break Outer //Break outer for loop.
+			//user choosed "log in" Do something about it.
+			fmt.Println(strings.Join(menuconfig.Menus[language].Login, "\n"))
+			break K //Break outer for loop.
 		case "2":
 			color.Printf("@{b}Version:%f\nAuthor:%s\n", version, author)
 		default:
-			color.Println("@{r}Invalid input. Please try again")
+			color.Printf("@{r}%s\n", menuconfig.Menus[language].Invalid)
+		}
+	}
+
+	// 	"1) withdraw",
+	// 	"2) input",
+	// 	"3) Balance"
+L:
+	for {
+		fmt.Print(prompt)
+		switch <-input {
+		case "1":
+			color.Println("@{b}Input $")
+			break L
+		case "2":
+			color.Println("@{b}Input $")
+			break L
+		case "3":
+			color.Println("@{b}Checking balance...")
+			break L
+		default:
+			color.Printf("@{r}%s\n", menuconfig.Menus[language].Invalid)
 		}
 	}
 }

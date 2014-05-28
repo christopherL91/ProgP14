@@ -6,6 +6,16 @@
 			"1) Logga in",
 			"2) Kontakta oss",
 			"................................................."
+		],
+		"log-in": [
+		".................................................",
+		"UNICORN INC",
+		"1) Uttag",
+		"2) Insättning",
+		"3) Saldo"
+		],
+		"invalid-input": [
+		"Felaktig inmatning. Vänligen försök igen."
 		]
 	},
 
@@ -16,6 +26,16 @@
 			"1) Log in",
 			"2) Contact us",
 			"................................................."
+		],
+		"log-in": [
+		".................................................",
+		"UNICORN INC",
+		"1) withdraw",
+		"2) input",
+		"3) Balance"
+		],
+		"invalid-input" : [
+		"Invalid input. Please try again."
 		]
 	}
 }
