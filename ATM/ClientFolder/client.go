@@ -29,10 +29,12 @@ import (
 	"flag"
 	"fmt"
 	"github.com/christopherL91/Protocol"
+	"github.com/ugorji/go/codec"
 	"github.com/wsxiaoys/terminal/color"
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 )
 
@@ -42,6 +44,7 @@ var (
 	prompt     = "Unicorn@ATM> "
 	version    = 1.5
 	author     = "Christopher Lillthors. Unicorn INC"
+	mh         codec.MsgpackHandle //MessagePack
 )
 
 //Struct to hold all the configurations.
@@ -52,20 +55,19 @@ type Config struct {
 	}
 }
 
-type client struct {
-	*Config
-	conn *net.TCPConn
-}
-
-func (c *client) listen(conn net.Conn, input chan string) {
-	color.Println("@{g}Downloading config files...")
-	var counter int //to increment the menu options.
-	var language string
+func listen(conn net.Conn, input chan string) {
+	writeCh := make(chan interface{}) //send messages.
+	go writeMessage(writeCh, conn)    // function to write to server.
+	var counter int                   //to increment the menu options.
+	var language string               //string to hold the language that the user choosed.
+	decoder := gob.NewDecoder(conn)
 	menuconfig := new(Protocol.MenuConfig)
-	err := gob.NewDecoder(conn).Decode(menuconfig)
+
+	color.Println("@{g}Downloading config files...")
+	err := decoder.Decode(menuconfig) //
 	checkError(err)
 	color.Println("@{g}Config files downloaded\n")
-
+	decoder = nil
 	color.Println("\t\t\t\t@{b}Choose language")
 
 	//print out the different languages you can choose on the screen.
@@ -74,8 +76,8 @@ func (c *client) listen(conn net.Conn, input chan string) {
 		color.Printf("@{g} %d) %s\n", counter, language)
 	}
 
-	//  1) swedish
-	// 2) english
+	//  1) Swedish
+	//  2) English
 
 	//User chooses languages.
 	for {
@@ -102,7 +104,8 @@ K:
 		case "1":
 			//user choosed "log in" Do something about it.
 			fmt.Println(strings.Join(menuconfig.Menus[language].Login, "\n"))
-			break K //Break outer for loop.
+			login(input, writeCh) //handle login from user.
+			break K               //Break outer for loop.
 		case "2":
 			color.Printf("@{b}Version:%f\nAuthor:%s\n", version, author)
 		default:
@@ -110,8 +113,8 @@ K:
 		}
 	}
 
-	// 	"1) withdraw",
-	// 	"2) input",
+	// 	"1) Withdraw",
+	// 	"2) Input",
 	// 	"3) Balance"
 L:
 	for {
@@ -132,6 +135,36 @@ L:
 	}
 }
 
+func writeMessage(writeCh chan interface{}, conn net.Conn) {
+	encoder := codec.NewEncoder(conn, &mh)
+	for {
+		select {
+		case message := <-writeCh:
+			err := encoder.Encode(message)
+			checkError(err)
+		}
+	}
+}
+
+//input chan is for keyboard input.
+func login(input chan string, writeCh chan interface{}) {
+	color.Println("@{b}Input cardnumber")
+	cardnumberString := <-input
+	color.Println("@{b}Input password")
+	passString := <-input
+
+	cardnumber, err := strconv.Atoi(cardnumberString)
+	checkError(err)
+	pass, err := strconv.Atoi(passString)
+	checkError(err)
+
+	login := Protocol.Login{
+		Number: uint16(cardnumber),
+		Pass:   uint8(pass),
+	}
+	writeCh <- login
+}
+
 func init() {
 	//For configurations.
 	flag.StringVar(&configPath, "config", "client.gcfg", "Path to config file")
@@ -139,52 +172,48 @@ func init() {
 }
 
 func main() {
-	//For UNIX signal handling.
-	c := make(chan os.Signal, 1)   //A channel to listen on keyboard events.
-	signal.Notify(c, os.Interrupt) //If user pressed CTRL - C.
-
 	//			Config area.
 	/*---------------------------------------------------*/
-	client := &client{Config: new(Config)}
-
+	config := new(Config)
 	var address string //holds the address to the server.
 	var port string    //holds the port to the server.
-
-	err := gcfg.ReadFileInto(client.Config, configPath)
+	err := gcfg.ReadFileInto(config, configPath)
 	checkError(err)
-	address = client.Config.Client.Address
-	port = client.Config.Client.Port
+	address = config.Client.Address
+	port = config.Client.Port
 	address += ":" + port
 	/*---------------------------------------------------*/
 
 	//			Connection area
 	/*---------------------------------------------------*/
-	tcpAddr, err := net.ResolveTCPAddr("tcp4", address)
-	checkError(err)
-	client.conn, err = net.DialTCP("tcp4", nil, tcpAddr)
+
+	conn, err := net.Dial("tcp", address) //connect to server.
 	checkError(err)
 
-	//A goroutine to check for keyboard events.
-	go func() {
-		<-c              //blocking.
-		defer os.Exit(1) //will just quit client if user pressed CTRL - C
-		client.conn.Close()
-		fmt.Fprintln(os.Stderr, "\nThank you for using a ATM from Unicorn INC")
-	}() //Execute goroutine
+	//For UNIX signal handling.
+	c := make(chan os.Signal)      //A channel to listen on keyboard events.
+	signal.Notify(c, os.Interrupt) //If user pressed CTRL - C.
+	go cleanUp(c, conn)
+
 	inputCh := make(chan string)
+	go listen(conn, inputCh) //listen on keyboard events.
+
 	reader := bufio.NewReader(os.Stdin)
-
-	go client.listen(client.conn, inputCh)
-
 	for {
-		// fmt.Print(prompt)
 		line, _ := reader.ReadString('\n')
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		inputCh <- line
+		inputCh <- line //listen on keyboard.
 	}
+}
+
+func cleanUp(c chan os.Signal, conn net.Conn) {
+	<-c
+	conn.Close() //close connection.
+	fmt.Fprintln(os.Stderr, "\nThank you for using a ATM from Unicorn INC")
+	os.Exit(1)
 }
 
 //Convinience function.

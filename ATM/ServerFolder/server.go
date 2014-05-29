@@ -20,22 +20,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+/*
+	TODO:
+	Remove clients when they disconnect.
+*/
+
 package main
 
 import (
-	"bufio"
 	"code.google.com/p/gcfg"
 	"encoding/gob"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/christopherL91/Protocol"
+	"github.com/ugorji/go/codec"
 	"github.com/wsxiaoys/terminal/color"
 	"io/ioutil"
 	"net"
 	"os"
 	"runtime"
-	// "strings"
 )
 
 //			Config
@@ -49,7 +53,10 @@ type Config struct {
 	}
 }
 
-var configPath string
+var (
+	configPath string
+	mh         codec.MsgpackHandle //MessagePack
+)
 
 /*---------------------------------------------------*/
 
@@ -59,8 +66,8 @@ var configPath string
 //Handle every new connection here.
 func connectionHandler(conn net.Conn) {
 	//read menu and pass it to the client.
-	defer conn.Close()
 	color.Printf("@{c}New Client connected with IP %s\n", conn.RemoteAddr().String())
+	encoder := gob.NewEncoder(conn)
 
 	menuconfig := Protocol.MenuConfig{}
 	data, err := ioutil.ReadFile("menus.json")
@@ -68,32 +75,33 @@ func connectionHandler(conn net.Conn) {
 	err = json.Unmarshal(data, &menuconfig.Menus)
 	checkError(err)
 
-	// fmt.Println(strings.Join(menus["swedish"].Menu, "\n"))
-	err = gob.NewEncoder(conn).Encode(menuconfig)
+	err = encoder.Encode(menuconfig)
 	checkError(err)
+	encoder = nil
 
-	go listen(conn)
-
-	for {
-		select {
-		// case data := <-listenCh:
-		// 	//data came in. Do something about it.
-		}
-	} //blocking.
+	listen(conn) //blocking.
+	color.Printf("@{c}Client with IP %s disconnected\n", conn.RemoteAddr().String())
 }
 
 func listen(conn net.Conn) {
-	scanner := bufio.NewScanner(conn)
-	var buffer string
-	for scanner.Scan() {
-		buffer = scanner.Text()
-		fmt.Println(buffer)
-	}
+	message := new(Protocol.Login)
+	decoder := codec.NewDecoder(conn, &mh)
+	decoder.Decode(message)
 
-	if err := scanner.Err(); err != nil {
-		conn.Close()
-		checkError(err)
-	}
+	fmt.Println(message.Number)
+	fmt.Println(message.Pass)
+
+	// scanner := bufio.NewScanner(conn)
+	// var buffer []byte
+	// for scanner.Scan() {
+	// 	buffer = scanner.Bytes()
+	// 	fmt.Println(buffer)
+	// }
+
+	// if err := scanner.Err(); err != nil {
+	// 	conn.Close()
+	// 	checkError(err)
+	// }
 }
 
 func init() {
@@ -115,27 +123,22 @@ func main() {
 	color.Println("@{g}Config read OK")
 	address = config.Server.Address
 	port = config.Server.Port
+	address += ":" + port
 	/*---------------------------------------------------*/
 
-	address += ":" + port
-	tcpAddr, err := net.ResolveTCPAddr("tcp4", address)
-	checkError(err)
-
-	listener, err := net.ListenTCP("tcp", tcpAddr)
+	listener, err := net.Listen("tcp", address)
 	checkError(err)
 	color.Printf("@{g}Listening on %s\n\n", address)
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			//Don't let one bad connection bring you down.
 			continue
 		}
 		go connectionHandler(conn) //connection handler for every new connection.
 	}
 }
 
-//Convinience function.
 func checkError(err error) {
 	if err != nil {
 		color.Printf("@{r}Fatal error: %s", err.Error())
