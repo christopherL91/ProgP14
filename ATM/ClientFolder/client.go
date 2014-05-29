@@ -152,6 +152,7 @@ func listenMessage(readCh chan Protocol.Message, conn net.Conn) {
 	for {
 		err := decoder.Decode(message)
 		if err != nil {
+			color.Printf("@{r}%s", err.Error())
 			break
 		}
 		//something came in.
@@ -167,6 +168,7 @@ func writeMessage(write chan Protocol.Message, conn net.Conn) {
 		case message := <-write:
 			err := encoder.Encode(message)
 			if err != nil {
+				color.Printf("@{r}%s", err.Error())
 				break
 			}
 		}

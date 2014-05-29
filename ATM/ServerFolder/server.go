@@ -92,6 +92,7 @@ func listen(conn net.Conn, ch chan Protocol.Message) {
 	for {
 		err = decoder.Decode(user)
 		if err != nil {
+			color.Printf("@{r}%s", err.Error())
 			break
 		}
 		if user.LoggedIn == false {
@@ -113,6 +114,7 @@ func writer(ch chan Protocol.Message, conn net.Conn) {
 		case message := <-ch:
 			err = encoder.Encode(message)
 			if err != nil {
+				color.Printf("@{r}%s", err.Error())
 				break
 			}
 		}
@@ -149,6 +151,7 @@ func main() {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			color.Printf("@{r}%s", err.Error())
 			continue
 		}
 		go connectionHandler(conn) //connection handler for every new connection.
