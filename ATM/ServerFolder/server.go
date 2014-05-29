@@ -32,7 +32,7 @@ import (
 	"encoding/gob"
 	"encoding/json"
 	"flag"
-	"fmt"
+	// "fmt"
 	"github.com/christopherL91/Protocol"
 	"github.com/ugorji/go/codec"
 	"github.com/wsxiaoys/terminal/color"
@@ -66,6 +66,7 @@ var (
 //Handle every new connection here.
 func connectionHandler(conn net.Conn) {
 	//read menu and pass it to the client.
+	messageCh := make(chan Protocol.Message)
 	color.Printf("@{c}New Client connected with IP %s\n", conn.RemoteAddr().String())
 	encoder := gob.NewEncoder(conn)
 
@@ -79,29 +80,43 @@ func connectionHandler(conn net.Conn) {
 	checkError(err)
 	encoder = nil
 
-	listen(conn) //blocking.
+	go writer(messageCh, conn)
+	listen(conn, messageCh) //blocking.
 	color.Printf("@{c}Client with IP %s disconnected\n", conn.RemoteAddr().String())
 }
 
-func listen(conn net.Conn) {
-	message := new(Protocol.Login)
+func listen(conn net.Conn, ch chan Protocol.Message) {
+	user := new(Protocol.Message)
 	decoder := codec.NewDecoder(conn, &mh)
-	decoder.Decode(message)
+	var err error
+	for {
+		err = decoder.Decode(user)
+		if err != nil {
+			break
+		}
+		if user.LoggedIn == false {
+			color.Printf("@{g}User with IP %s are trying to login\n", conn.RemoteAddr().String())
+			color.Println("@{g}Sending granted message...")
+			ch <- Protocol.Message{
+				LoggedIn: true,
+			}
+			color.Printf("@{g}Successfully sent granted message to user with IP %s\n", conn.RemoteAddr().String())
+		}
+	}
+}
 
-	fmt.Println(message.Number)
-	fmt.Println(message.Pass)
-
-	// scanner := bufio.NewScanner(conn)
-	// var buffer []byte
-	// for scanner.Scan() {
-	// 	buffer = scanner.Bytes()
-	// 	fmt.Println(buffer)
-	// }
-
-	// if err := scanner.Err(); err != nil {
-	// 	conn.Close()
-	// 	checkError(err)
-	// }
+func writer(ch chan Protocol.Message, conn net.Conn) {
+	encoder := codec.NewEncoder(conn, &mh)
+	var err error
+	for {
+		select {
+		case message := <-ch:
+			err = encoder.Encode(message)
+			if err != nil {
+				break
+			}
+		}
+	}
 }
 
 func init() {
@@ -113,7 +128,8 @@ func init() {
 
 func main() {
 	/*---------------------------------------------------*/
-	config := new(Config)                        //new config struct.
+	config := new(Config) //new config struct.
+
 	var address string                           //holds the address to the server.
 	var port string                              //holds the port to the server.
 	color.Println("\t\t\t\t@{b}ATM started")     //Print out with colors.

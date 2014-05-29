@@ -26,6 +26,7 @@ import (
 	"bufio"
 	"code.google.com/p/gcfg"
 	"encoding/gob"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/christopherL91/Protocol"
@@ -34,17 +35,20 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 )
 
 //Configuration stuff.
 var (
-	configPath string
-	prompt     = "Unicorn@ATM> "
-	version    = 1.5
-	author     = "Christopher Lillthors. Unicorn INC"
-	mh         codec.MsgpackHandle //MessagePack
+	configPath     string
+	prompt         = "Unicorn@ATM> "
+	version        = 1.5
+	author         = "Christopher Lillthors. Unicorn INC"
+	mh             codec.MsgpackHandle                  //MessagePack
+	cardnumberTest = regexp.MustCompile(`^([0-9]){4}$`) //4 digits.
+	passnumberTest = regexp.MustCompile(`^([0-9]){2}$`) //2 digits.
 )
 
 //Struct to hold all the configurations.
@@ -56,10 +60,8 @@ type Config struct {
 }
 
 func listen(conn net.Conn, input chan string) {
-	writeCh := make(chan interface{}) //send messages.
-	go writeMessage(writeCh, conn)    // function to write to server.
-	var counter int                   //to increment the menu options.
-	var language string               //string to hold the language that the user choosed.
+	var counter int     //to increment the menu options.
+	var language string //string to hold the language that the user choosed.
 	decoder := gob.NewDecoder(conn)
 	menuconfig := new(Protocol.MenuConfig)
 
@@ -69,6 +71,11 @@ func listen(conn net.Conn, input chan string) {
 	color.Println("@{g}Config files downloaded\n")
 	decoder = nil
 	color.Println("\t\t\t\t@{b}Choose language")
+
+	writeCh := make(chan Protocol.Message) //send messages.
+	readCh := make(chan Protocol.Message)  //read messages.
+	go listenMessage(readCh, conn)         // function to listen to server.
+	go writeMessage(writeCh, conn)         //function to write to server.
 
 	//print out the different languages you can choose on the screen.
 	for language, _ := range menuconfig.Menus {
@@ -103,9 +110,13 @@ K:
 		switch <-input {
 		case "1":
 			//user choosed "log in" Do something about it.
-			fmt.Println(strings.Join(menuconfig.Menus[language].Login, "\n"))
-			login(input, writeCh) //handle login from user.
-			break K               //Break outer for loop.
+			err := login(input, writeCh, readCh) //handle login from user.
+			if err != nil {
+				conn.Close()
+				color.Printf("@{r}%s", err.Error())
+			}
+			fmt.Println(strings.Join(menuconfig.Menus[language].Login, "\n")) //print out the rest of the menu.
+			break K                                                           //Break outer for loop.
 		case "2":
 			color.Printf("@{b}Version:%f\nAuthor:%s\n", version, author)
 		default:
@@ -135,34 +146,64 @@ L:
 	}
 }
 
-func writeMessage(writeCh chan interface{}, conn net.Conn) {
+func listenMessage(readCh chan Protocol.Message, conn net.Conn) {
+	message := new(Protocol.Message)
+	decoder := codec.NewDecoder(conn, &mh)
+	for {
+		err := decoder.Decode(message)
+		if err != nil {
+			break
+		}
+		//something came in.
+		readCh <- *message
+	}
+}
+
+//write messages to the server.
+func writeMessage(write chan Protocol.Message, conn net.Conn) {
 	encoder := codec.NewEncoder(conn, &mh)
 	for {
 		select {
-		case message := <-writeCh:
+		case message := <-write:
 			err := encoder.Encode(message)
-			checkError(err)
+			if err != nil {
+				break
+			}
 		}
 	}
 }
 
 //input chan is for keyboard input.
-func login(input chan string, writeCh chan interface{}) {
-	color.Println("@{b}Input cardnumber")
-	cardnumberString := <-input
-	color.Println("@{b}Input password")
-	passString := <-input
-
-	cardnumber, err := strconv.Atoi(cardnumberString)
-	checkError(err)
-	pass, err := strconv.Atoi(passString)
-	checkError(err)
-
-	login := Protocol.Login{
-		Number: uint16(cardnumber),
-		Pass:   uint8(pass),
+func login(input chan string, writeCh, readCh chan Protocol.Message) error {
+	var cardNum, passNum string
+	for {
+		color.Println("@{b}Input cardnumber.")
+		cardNum = <-input
+		color.Println("@{b}Input password.")
+		passNum = <-input
+		if cardnumberTest.MatchString(cardNum) && passnumberTest.MatchString(passNum) {
+			break
+		} else {
+			color.Println("@{r}Invalid credentials. Please try again.")
+		}
 	}
-	writeCh <- login
+
+	card, _ := strconv.Atoi(cardNum)
+	pass, _ := strconv.Atoi(passNum)
+
+	login := Protocol.Message{
+		Number:   uint16(card),
+		Pass:     uint16(pass),
+		LoggedIn: false,
+	}
+	writeCh <- login   //send message from server.
+	answer := <-readCh //read answer from server.
+	if answer.LoggedIn {
+		color.Println("@{gB}\nYou were granted access")
+		return nil
+	} else {
+		return errors.New("Something happened. Please restart session")
+	}
 }
 
 func init() {
