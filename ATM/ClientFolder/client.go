@@ -32,12 +32,14 @@ import (
 	"github.com/christopherL91/Protocol"
 	"github.com/ugorji/go/codec"
 	"github.com/wsxiaoys/terminal/color"
+	"io"
 	"net"
 	"os"
 	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 //Configuration stuff.
@@ -147,15 +149,15 @@ L:
 }
 
 func listenMessage(readCh chan Protocol.Message, conn net.Conn) {
-	message := new(Protocol.Message)
 	decoder := codec.NewDecoder(conn, &mh)
 	for {
+		message := new(Protocol.Message)
 		err := decoder.Decode(message)
-		if err != nil {
-			color.Printf("@{r}%s", err.Error())
-			break
+		if err == io.EOF {
+			color.Println("@{r}Server closed connection")
+			os.Exit(1)
 		}
-		//something came in.
+		checkError(err)
 		readCh <- *message
 	}
 }
@@ -179,9 +181,11 @@ func writeMessage(write chan Protocol.Message, conn net.Conn) {
 func login(input chan string, writeCh, readCh chan Protocol.Message) error {
 	var cardNum, passNum string
 	for {
-		color.Println("@{b}Input cardnumber.")
+		color.Println("@{gB}Input cardnumber.")
+		fmt.Print(prompt)
 		cardNum = <-input
-		color.Println("@{b}Input password.")
+		color.Println("@{gB}Input password.")
+		fmt.Print(prompt)
 		passNum = <-input
 		if cardnumberTest.MatchString(cardNum) && passnumberTest.MatchString(passNum) {
 			break
@@ -193,18 +197,18 @@ func login(input chan string, writeCh, readCh chan Protocol.Message) error {
 	card, _ := strconv.Atoi(cardNum)
 	pass, _ := strconv.Atoi(passNum)
 
-	login := Protocol.Message{
+	message := Protocol.Message{
 		Number:   uint16(card),
 		Pass:     uint16(pass),
 		LoggedIn: false,
 	}
-	writeCh <- login   //send message from server.
+	writeCh <- message //send message from server.
 	answer := <-readCh //read answer from server.
 	if answer.LoggedIn {
-		color.Println("@{gB}\nYou were granted access")
+		color.Println("@{gB}\nYou were granted access.")
 		return nil
 	} else {
-		return errors.New("Something happened. Please restart session")
+		return errors.New("Something strange happened. Please restart session.")
 	}
 }
 
@@ -230,7 +234,7 @@ func main() {
 	//			Connection area
 	/*---------------------------------------------------*/
 
-	conn, err := net.Dial("tcp", address) //connect to server.
+	conn, err := net.DialTimeout("tcp", address, 30*time.Second)
 	checkError(err)
 
 	//For UNIX signal handling.

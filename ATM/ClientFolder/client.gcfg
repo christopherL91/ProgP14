@@ -1,4 +1,4 @@
 ;The client expects all the values to be filled in.
 [Client]
-address = 127.0.0.1
+address = localhost ;107.170.111.147
 port = 4000

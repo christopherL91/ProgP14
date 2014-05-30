@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"flag"
 	// "fmt"
+	"errors"
 	"github.com/christopherL91/Protocol"
 	"github.com/ugorji/go/codec"
 	"github.com/wsxiaoys/terminal/color"
@@ -40,6 +41,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"time"
 )
 
 //			Config
@@ -54,8 +56,9 @@ type Config struct {
 }
 
 var (
-	configPath string
-	mh         codec.MsgpackHandle //MessagePack
+	configPath       string
+	mh               codec.MsgpackHandle //MessagePack
+	numberOfMessages = 10
 )
 
 /*---------------------------------------------------*/
@@ -65,8 +68,9 @@ var (
 
 //Handle every new connection here.
 func connectionHandler(conn net.Conn) {
-	//read menu and pass it to the client.
-	messageCh := make(chan Protocol.Message)
+	defer conn.Close()
+	write := make(chan Protocol.Message, numberOfMessages)
+	read := make(chan Protocol.Message, numberOfMessages)
 	color.Printf("@{c}New Client connected with IP %s\n", conn.RemoteAddr().String())
 	encoder := gob.NewEncoder(conn)
 
@@ -78,45 +82,55 @@ func connectionHandler(conn net.Conn) {
 
 	err = encoder.Encode(menuconfig)
 	checkError(err)
-	encoder = nil
-
-	go writer(messageCh, conn)
-	listen(conn, messageCh) //blocking.
-	color.Printf("@{c}Client with IP %s disconnected\n", conn.RemoteAddr().String())
+	readWrite(conn, read, write)
+	color.Printf("@{c}Client with IP disconnected %s\n", conn.RemoteAddr().String())
 }
 
-func listen(conn net.Conn, ch chan Protocol.Message) {
-	user := new(Protocol.Message)
-	decoder := codec.NewDecoder(conn, &mh)
-	var err error
+func readMessages(decoder *codec.Decoder, read chan Protocol.Message, errChan chan error, conn net.Conn) {
 	for {
-		err = decoder.Decode(user)
-		if err != nil {
-			color.Printf("@{r}%s", err.Error())
+		message := new(Protocol.Message)
+		conn.SetReadDeadline(time.Now().Add(15 * time.Minute))
+		err := decoder.Decode(message)
+		opErr, ok := err.(*net.OpError)
+		if ok && opErr.Timeout() {
+			errChan <- errors.New("Client connection timeout.")
 			break
 		}
-		if user.LoggedIn == false {
-			color.Printf("@{g}User with IP %s are trying to login\n", conn.RemoteAddr().String())
-			color.Println("@{g}Sending granted message...")
-			ch <- Protocol.Message{
-				LoggedIn: true,
-			}
-			color.Printf("@{g}Successfully sent granted message to user with IP %s\n", conn.RemoteAddr().String())
+		if err != nil {
+			errChan <- err
+			break
 		}
+		read <- *message
 	}
+
 }
 
-func writer(ch chan Protocol.Message, conn net.Conn) {
+func readWrite(conn net.Conn, write, read chan Protocol.Message) {
+	decoder := codec.NewDecoder(conn, &mh)
 	encoder := codec.NewEncoder(conn, &mh)
+	errChan := make(chan error)
 	var err error
+	go readMessages(decoder, read, errChan, conn)
+Outer:
 	for {
 		select {
-		case message := <-ch:
+		case message := <-write: //write messages.
 			err = encoder.Encode(message)
 			if err != nil {
 				color.Printf("@{r}%s", err.Error())
-				break
+				break Outer
 			}
+		case message := <-read:
+			if message.LoggedIn == false {
+				color.Printf("@{g}User with IP %s are trying to login\n", conn.RemoteAddr().String())
+				color.Println("@{g}Sending granted message...")
+				write <- Protocol.Message{
+					LoggedIn: true,
+				}
+				color.Printf("@{g}Successfully sent granted message to user with IP %s\n", conn.RemoteAddr().String())
+			}
+		case err = <-errChan:
+			break Outer
 		}
 	}
 }
