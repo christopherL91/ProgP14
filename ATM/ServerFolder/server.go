@@ -31,16 +31,17 @@ import (
 	"code.google.com/p/gcfg"
 	"encoding/gob"
 	"encoding/json"
-	"flag"
-	// "fmt"
 	"errors"
+	"flag"
 	"github.com/christopherL91/Protocol"
 	"github.com/ugorji/go/codec"
 	"github.com/wsxiaoys/terminal/color"
 	"io/ioutil"
 	"net"
 	"os"
+	"os/signal"
 	"runtime"
+	"sync"
 	"time"
 )
 
@@ -59,7 +60,21 @@ var (
 	configPath       string
 	mh               codec.MsgpackHandle //MessagePack
 	numberOfMessages = 10
+	users            = map[uint16]uint16{
+		1234: 12,
+		1123: 13,
+	}
 )
+
+type server struct {
+	mutex           *sync.Mutex
+	money           map[uint16]uint16    //cardnumber -> money
+	connections     map[*net.Conn]bool   //connected users.
+	loggedInclients map[*net.Conn]uint16 //connection -> cardnumber.
+	balanceCh       chan *Protocol.Message
+	withdrawCh      chan *Protocol.Message
+	depositCh       chan *Protocol.Message
+}
 
 /*---------------------------------------------------*/
 
@@ -67,12 +82,12 @@ var (
 /*---------------------------------------------------*/
 
 //Handle every new connection here.
-func connectionHandler(conn net.Conn) {
-	defer conn.Close()
+func (s *server) connectionHandler(conn *net.Conn) {
+	defer (*conn).Close()
 	write := make(chan Protocol.Message, numberOfMessages)
 	read := make(chan Protocol.Message, numberOfMessages)
-	color.Printf("@{c}New Client connected with IP %s\n", conn.RemoteAddr().String())
-	encoder := gob.NewEncoder(conn)
+	color.Printf("@{c}New Client connected with IP %s\n", (*conn).RemoteAddr().String())
+	encoder := gob.NewEncoder(*conn)
 
 	menuconfig := Protocol.MenuConfig{}
 	data, err := ioutil.ReadFile("menus.json")
@@ -82,14 +97,14 @@ func connectionHandler(conn net.Conn) {
 
 	err = encoder.Encode(menuconfig)
 	checkError(err)
-	readWrite(conn, read, write)
-	color.Printf("@{c}Client with IP disconnected %s\n", conn.RemoteAddr().String())
+	s.readWrite(conn, read, write)
+	color.Printf("@{c}Client with IP disconnected %s\n", (*conn).RemoteAddr().String())
 }
 
-func readMessages(decoder *codec.Decoder, read chan Protocol.Message, errChan chan error, conn net.Conn) {
+func readMessages(decoder *codec.Decoder, read chan Protocol.Message, errChan chan error, conn *net.Conn) {
 	for {
 		message := new(Protocol.Message)
-		conn.SetReadDeadline(time.Now().Add(15 * time.Minute))
+		(*conn).SetReadDeadline(time.Now().Add(15 * time.Minute))
 		err := decoder.Decode(message)
 		opErr, ok := err.(*net.OpError)
 		if ok && opErr.Timeout() {
@@ -105,9 +120,59 @@ func readMessages(decoder *codec.Decoder, read chan Protocol.Message, errChan ch
 
 }
 
-func readWrite(conn net.Conn, write, read chan Protocol.Message) {
-	decoder := codec.NewDecoder(conn, &mh)
-	encoder := codec.NewEncoder(conn, &mh)
+func (s *server) banker(balanceCh, withdrawCh, depositCh chan *Protocol.Message) {
+	for {
+		select {
+		case client := <-balanceCh:
+			balanceCh <- &Protocol.Message{
+				Payload: s.money[client.Number],
+			}
+		case client := <-withdrawCh:
+			cardNumber := client.Number
+			currentBalance := s.money[cardNumber]
+			requested := client.Payload
+			if currentBalance < requested || requested < 0 {
+				balanceCh <- &Protocol.Message{
+					Payload: 0, //operation failed.
+				}
+			} else {
+				s.money[cardNumber] = currentBalance - requested
+				balanceCh <- &Protocol.Message{
+					Payload: 1, //operation succed.
+				}
+			}
+		case client := <-depositCh:
+			cardNumber := client.Number
+			currentBalance := s.money[cardNumber]
+			requested := client.Payload
+			s.money[cardNumber] = currentBalance + requested
+			balanceCh <- &Protocol.Message{
+				Payload: 1,
+			}
+		}
+	}
+}
+
+func (s *server) setLogin(state bool, conn *net.Conn, number uint16) {
+	s.mutex.Lock()
+	s.loggedInclients[conn] = number
+	s.mutex.Unlock()
+}
+
+func (s *server) isAccepted(card, pass uint16) bool {
+	_, ok := users[card]
+	if !ok {
+		return false //could not find user in map.
+	}
+	if users[card] == pass {
+		return true
+	}
+	return false
+}
+
+func (s *server) readWrite(conn *net.Conn, write, read chan Protocol.Message) {
+	decoder := codec.NewDecoder(*conn, &mh)
+	encoder := codec.NewEncoder(*conn, &mh)
 	errChan := make(chan error)
 	var err error
 	go readMessages(decoder, read, errChan, conn)
@@ -121,15 +186,23 @@ Outer:
 				break Outer
 			}
 		case message := <-read:
-			if message.LoggedIn == false {
-				color.Printf("@{g}User with IP %s are trying to login\n", conn.RemoteAddr().String())
-				color.Println("@{g}Sending granted message...")
-				write <- Protocol.Message{
-					LoggedIn: true,
+			ip := (*conn).RemoteAddr().String()
+			if !message.LoggedIn {
+				color.Printf("@{g}User with IP %s are trying to login\n", ip)
+				if s.isAccepted(message.Number, message.Payload) {
+					color.Println("@{g}Sending granted message...")
+					write <- Protocol.Message{
+						LoggedIn: true,
+					}
+					color.Printf("@{g}Successfully sent granted message to user with IP %s\n", ip)
+				} else {
+					write <- Protocol.Message{
+						LoggedIn: false,
+					}
+					color.Printf("@{g}Client with IP %s tried to log in with wrong credentials\n", ip)
 				}
-				color.Printf("@{g}Successfully sent granted message to user with IP %s\n", conn.RemoteAddr().String())
 			}
-		case err = <-errChan:
+		case err = <-errChan: //error chan.
 			break Outer
 		}
 	}
@@ -142,9 +215,45 @@ func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU()) //Use maximal number of cores.
 }
 
+func (s *server) addConnection(conn *net.Conn) {
+	s.mutex.Lock()
+	s.connections[conn] = true
+	s.mutex.Unlock()
+}
+
+func (s *server) cleanUp(c chan os.Signal) {
+	<-c
+	color.Println("@{c}\nClosing every client connection...")
+	s.mutex.Lock()
+	for conn, _ := range s.connections {
+		if conn == nil {
+			continue
+		}
+		err := (*conn).Close()
+		if err != nil {
+			continue
+		}
+	}
+	s.mutex.Unlock()
+	color.Println("@{r}\nServer is now closing...")
+	os.Exit(1)
+}
+
 func main() {
 	/*---------------------------------------------------*/
-	config := new(Config) //new config struct.
+	c := make(chan os.Signal)      //A channel to listen on keyboard events.
+	signal.Notify(c, os.Interrupt) //If user pressed CTRL - C.
+	config := new(Config)          //new config struct.
+	server := &server{
+		mutex:           new(sync.Mutex),
+		money:           make(map[uint16]uint16),
+		connections:     make(map[*net.Conn]bool),
+		loggedInclients: make(map[*net.Conn]uint16),
+		balanceCh:       make(chan *Protocol.Message, numberOfMessages),
+		withdrawCh:      make(chan *Protocol.Message, numberOfMessages),
+		depositCh:       make(chan *Protocol.Message),
+	}
+	go server.cleanUp(c)
 
 	var address string                           //holds the address to the server.
 	var port string                              //holds the port to the server.
@@ -168,7 +277,8 @@ func main() {
 			color.Printf("@{r}%s", err.Error())
 			continue
 		}
-		go connectionHandler(conn) //connection handler for every new connection.
+		server.addConnection(&conn)        //add connections.
+		go server.connectionHandler(&conn) //connection handler for every new connection.
 	}
 }
 

@@ -61,23 +61,22 @@ type Config struct {
 	}
 }
 
-func listen(conn net.Conn, input chan string) {
+func listen(conn *net.Conn, input chan string) {
 	var counter int     //to increment the menu options.
 	var language string //string to hold the language that the user choosed.
-	decoder := gob.NewDecoder(conn)
+	decoder := gob.NewDecoder(*conn)
 	menuconfig := new(Protocol.MenuConfig)
 
 	color.Println("@{g}Downloading config files...")
 	err := decoder.Decode(menuconfig) //
 	checkError(err)
 	color.Println("@{g}Config files downloaded\n")
-	decoder = nil
 	color.Println("\t\t\t\t@{b}Choose language")
 
-	writeCh := make(chan Protocol.Message) //send messages.
-	readCh := make(chan Protocol.Message)  //read messages.
-	go listenMessage(readCh, conn)         // function to listen to server.
-	go writeMessage(writeCh, conn)         //function to write to server.
+	writeCh := make(chan *Protocol.Message) //send messages.
+	readCh := make(chan *Protocol.Message)  //read messages.
+	go listenMessage(readCh, conn)          // function to listen to server.
+	go writeMessage(writeCh, conn)          //function to write to server.
 
 	//print out the different languages you can choose on the screen.
 	for language, _ := range menuconfig.Menus {
@@ -114,8 +113,8 @@ K:
 			//user choosed "log in" Do something about it.
 			err := login(input, writeCh, readCh) //handle login from user.
 			if err != nil {
-				conn.Close()
 				color.Printf("@{r}%s", err.Error())
+				break
 			}
 			fmt.Println(strings.Join(menuconfig.Menus[language].Login, "\n")) //print out the rest of the menu.
 			break K                                                           //Break outer for loop.
@@ -148,8 +147,8 @@ L:
 	}
 }
 
-func listenMessage(readCh chan Protocol.Message, conn net.Conn) {
-	decoder := codec.NewDecoder(conn, &mh)
+func listenMessage(readCh chan *Protocol.Message, conn *net.Conn) {
+	decoder := codec.NewDecoder(*conn, &mh)
 	for {
 		message := new(Protocol.Message)
 		err := decoder.Decode(message)
@@ -158,13 +157,13 @@ func listenMessage(readCh chan Protocol.Message, conn net.Conn) {
 			os.Exit(1)
 		}
 		checkError(err)
-		readCh <- *message
+		readCh <- message
 	}
 }
 
 //write messages to the server.
-func writeMessage(write chan Protocol.Message, conn net.Conn) {
-	encoder := codec.NewEncoder(conn, &mh)
+func writeMessage(write chan *Protocol.Message, conn *net.Conn) {
+	encoder := codec.NewEncoder(*conn, &mh)
 	for {
 		select {
 		case message := <-write:
@@ -178,7 +177,7 @@ func writeMessage(write chan Protocol.Message, conn net.Conn) {
 }
 
 //input chan is for keyboard input.
-func login(input chan string, writeCh, readCh chan Protocol.Message) error {
+func login(input chan string, writeCh, readCh chan *Protocol.Message) error {
 	var cardNum, passNum string
 	for {
 		color.Println("@{gB}Input cardnumber.")
@@ -197,10 +196,9 @@ func login(input chan string, writeCh, readCh chan Protocol.Message) error {
 	card, _ := strconv.Atoi(cardNum)
 	pass, _ := strconv.Atoi(passNum)
 
-	message := Protocol.Message{
-		Number:   uint16(card),
-		Pass:     uint16(pass),
-		LoggedIn: false,
+	message := &Protocol.Message{
+		Number:  uint16(card),
+		Payload: uint16(pass),
 	}
 	writeCh <- message //send message from server.
 	answer := <-readCh //read answer from server.
@@ -233,17 +231,17 @@ func main() {
 
 	//			Connection area
 	/*---------------------------------------------------*/
-
+	//Server has 30 seconds to respond.
 	conn, err := net.DialTimeout("tcp", address, 30*time.Second)
 	checkError(err)
 
 	//For UNIX signal handling.
 	c := make(chan os.Signal)      //A channel to listen on keyboard events.
 	signal.Notify(c, os.Interrupt) //If user pressed CTRL - C.
-	go cleanUp(c, conn)
+	go cleanUp(c, &conn)
 
 	inputCh := make(chan string)
-	go listen(conn, inputCh) //listen on keyboard events.
+	go listen(&conn, inputCh) //listen on keyboard events.
 
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -256,9 +254,9 @@ func main() {
 	}
 }
 
-func cleanUp(c chan os.Signal, conn net.Conn) {
+func cleanUp(c chan os.Signal, conn *net.Conn) {
 	<-c
-	conn.Close() //close connection.
+	(*conn).Close() //close connection.
 	fmt.Fprintln(os.Stderr, "\nThank you for using a ATM from Unicorn INC")
 	os.Exit(1)
 }
