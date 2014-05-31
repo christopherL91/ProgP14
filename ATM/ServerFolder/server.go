@@ -84,8 +84,8 @@ type server struct {
 //Handle every new connection here.
 func (s *server) connectionHandler(conn *net.Conn) {
 	defer (*conn).Close()
-	write := make(chan Protocol.Message, numberOfMessages)
-	read := make(chan Protocol.Message, numberOfMessages)
+	write := make(chan *Protocol.Message, numberOfMessages)
+	read := make(chan *Protocol.Message, numberOfMessages)
 	color.Printf("@{c}New Client connected with IP %s\n", (*conn).RemoteAddr().String())
 	encoder := gob.NewEncoder(*conn)
 
@@ -101,7 +101,7 @@ func (s *server) connectionHandler(conn *net.Conn) {
 	color.Printf("@{c}Client with IP disconnected %s\n", (*conn).RemoteAddr().String())
 }
 
-func readMessages(decoder *codec.Decoder, read chan Protocol.Message, errChan chan error, conn *net.Conn) {
+func readMessages(decoder *codec.Decoder, read chan *Protocol.Message, errChan chan error, conn *net.Conn) {
 	for {
 		message := new(Protocol.Message)
 		(*conn).SetReadDeadline(time.Now().Add(15 * time.Minute))
@@ -115,7 +115,7 @@ func readMessages(decoder *codec.Decoder, read chan Protocol.Message, errChan ch
 			errChan <- err
 			break
 		}
-		read <- *message
+		read <- message
 	}
 
 }
@@ -170,7 +170,7 @@ func (s *server) isAccepted(card, pass uint16) bool {
 	return false
 }
 
-func (s *server) readWrite(conn *net.Conn, write, read chan Protocol.Message) {
+func (s *server) readWrite(conn *net.Conn, write, read chan *Protocol.Message) {
 	decoder := codec.NewDecoder(*conn, &mh)
 	encoder := codec.NewEncoder(*conn, &mh)
 	errChan := make(chan error)
@@ -191,12 +191,12 @@ Outer:
 				color.Printf("@{g}User with IP %s are trying to login\n", ip)
 				if s.isAccepted(message.Number, message.Payload) {
 					color.Println("@{g}Sending granted message...")
-					write <- Protocol.Message{
+					write <- &Protocol.Message{
 						LoggedIn: true,
 					}
 					color.Printf("@{g}Successfully sent granted message to user with IP %s\n", ip)
 				} else {
-					write <- Protocol.Message{
+					write <- &Protocol.Message{
 						LoggedIn: false,
 					}
 					color.Printf("@{g}Client with IP %s tried to log in with wrong credentials\n", ip)

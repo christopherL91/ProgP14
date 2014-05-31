@@ -61,6 +61,49 @@ type Config struct {
 	}
 }
 
+func init() {
+	//For configurations.
+	flag.StringVar(&configPath, "config", "client.gcfg", "Path to config file")
+	flag.Parse()
+}
+
+func main() {
+	//			Config area.
+	/*---------------------------------------------------*/
+	config := new(Config)
+	var address string //holds the address to the server.
+	var port string    //holds the port to the server.
+	err := gcfg.ReadFileInto(config, configPath)
+	checkError(err)
+	address = config.Client.Address
+	port = config.Client.Port
+	address += ":" + port
+	/*---------------------------------------------------*/
+
+	//			Connection area
+	/*---------------------------------------------------*/
+	//Server has 30 seconds to respond.
+	conn, err := net.DialTimeout("tcp", address, 30*time.Second)
+	checkError(err)
+
+	//For UNIX signal handling.
+	c := make(chan os.Signal)      //A channel to listen on keyboard events.
+	signal.Notify(c, os.Interrupt) //If user pressed CTRL - C.
+	go cleanUp(c, &conn)
+
+	inputCh := make(chan string)
+	go listen(&conn, inputCh) //listen on keyboard events.
+
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		line, _ := reader.ReadString('\n')
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		inputCh <- line //listen on keyboard.
+	}
+}
 func listen(conn *net.Conn, input chan string) {
 	var counter int     //to increment the menu options.
 	var language string //string to hold the language that the user choosed.
@@ -207,50 +250,6 @@ func login(input chan string, writeCh, readCh chan *Protocol.Message) error {
 		return nil
 	} else {
 		return errors.New("Something strange happened. Please restart session.")
-	}
-}
-
-func init() {
-	//For configurations.
-	flag.StringVar(&configPath, "config", "client.gcfg", "Path to config file")
-	flag.Parse()
-}
-
-func main() {
-	//			Config area.
-	/*---------------------------------------------------*/
-	config := new(Config)
-	var address string //holds the address to the server.
-	var port string    //holds the port to the server.
-	err := gcfg.ReadFileInto(config, configPath)
-	checkError(err)
-	address = config.Client.Address
-	port = config.Client.Port
-	address += ":" + port
-	/*---------------------------------------------------*/
-
-	//			Connection area
-	/*---------------------------------------------------*/
-	//Server has 30 seconds to respond.
-	conn, err := net.DialTimeout("tcp", address, 30*time.Second)
-	checkError(err)
-
-	//For UNIX signal handling.
-	c := make(chan os.Signal)      //A channel to listen on keyboard events.
-	signal.Notify(c, os.Interrupt) //If user pressed CTRL - C.
-	go cleanUp(c, &conn)
-
-	inputCh := make(chan string)
-	go listen(&conn, inputCh) //listen on keyboard events.
-
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		line, _ := reader.ReadString('\n')
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		inputCh <- line //listen on keyboard.
 	}
 }
 
