@@ -36,7 +36,6 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -44,28 +43,12 @@ import (
 
 //Configuration stuff.
 var (
-	configPath     string
-	prompt         = "Unicorn@ATM> "
-	version        = 1.5
-	author         = "Christopher Lillthors. Unicorn INC"
-	address        = "Unicorn road 1337"
-	mh             codec.MsgpackHandle               //MessagePack
-	cardnumberTest = regexp.MustCompile(`^(\d){4}$`) //4 digits.
-	passnumberTest = regexp.MustCompile(`^(\d){2}$`) //2 digits.
-	moneyTest      = regexp.MustCompile(`^(\d+)$`)   //at least one digit.
-)
-
-const (
-	loginStatusCode    = 1
-	LogoutStatusCode   = 2
-	DepositStatusCode  = 3
-	WithdrawStatusCode = 4
-	BalanceStatusCode  = 5
-
-	responseOK              = 0
-	responseAlreadyLoggedIn = 1
-	responseNotAccepted     = 2
-	responseMoneyProblem    = 3
+	configPath string
+	prompt     = "Unicorn@ATM> "
+	version    = 1.5
+	author     = "Christopher Lillthors. Unicorn INC"
+	address    = "Unicorn road 1337"
+	mh         codec.MsgpackHandle //MessagePack
 )
 
 //Struct to hold all the configurations.
@@ -133,7 +116,7 @@ func listen(conn *net.Conn, input chan string) {
 
 	writeCh := make(chan *Protocol.Message) //send messages.
 	readCh := make(chan *Protocol.Message)  //read messages.
-	go listenMessage(readCh, conn)          // function to listen to server.
+	go readMessage(readCh, conn)            // function to listen to server.
 	go writeMessage(writeCh, conn)          //function to write to server.
 
 	//print out the different languages you can choose on the screen.
@@ -176,6 +159,7 @@ K:
 				color.Println("@{r}Please try again")
 				continue
 			}
+			fmt.Println()
 			fmt.Println(strings.Join(menuconfig.Menus[language].Login, "\n")) //print out the rest of the menu.
 			break K                                                           //Break outer for loop.
 		case "2":
@@ -188,50 +172,43 @@ K:
 	// 	"1) Withdraw",
 	// 	"2) Deposit",
 	// 	"3) Balance"
-L:
 	for {
 		fmt.Print(prompt)
 		switch <-input {
 		case "1":
-			err := bankHandler(WithdrawStatusCode, input, writeCh, readCh)
+			err := bankHandler(Protocol.WithdrawStatusCode, input, writeCh, readCh)
 			if err != nil {
 				color.Printf("@{r}%s\n", err.Error())
 				color.Println("@{r}Please try again")
 				continue
 			}
-			color.Println("@{gB}Success")
-			break L
 		case "2":
-			err := bankHandler(DepositStatusCode, input, writeCh, readCh)
+			err := bankHandler(Protocol.DepositStatusCode, input, writeCh, readCh)
 			if err != nil {
 				color.Printf("@{r}%s\n", err.Error())
 				color.Println("@{r}Please try again")
 				continue
 			}
-			color.Println("@{gB}Success")
-			break L
 		case "3":
-			err := bankHandler(BalanceStatusCode, input, writeCh, readCh)
+			err := bankHandler(Protocol.BalanceStatusCode, input, writeCh, readCh)
 			if err != nil {
 				color.Printf("@{r}%s\n", err.Error())
 				color.Println("@{r}Please try again")
 				continue
 			}
-			color.Println("@{gB}Success")
-			break L
 		default:
 			color.Printf("@{r}%s\n", menuconfig.Menus[language].Invalid)
 		}
 	}
 }
 
-func listenMessage(readCh chan *Protocol.Message, conn *net.Conn) {
+func readMessage(readCh chan *Protocol.Message, conn *net.Conn) {
 	decoder := codec.NewDecoder(*conn, &mh)
 	for {
 		message := new(Protocol.Message)
 		err := decoder.Decode(message)
 		if err == io.EOF {
-			color.Println("@{r}Server closed connection")
+			color.Printf("@{r}Server closed connection")
 			os.Exit(1)
 		}
 		checkError(err)
@@ -254,24 +231,68 @@ func writeMessage(write chan *Protocol.Message, conn *net.Conn) {
 	}
 }
 
-func bankHandler(code uint8, input chan string, writeCh, readCh chan *Protocol.Message) error {
+func bankHandler(code uint16, input chan string, writeCh, readCh chan *Protocol.Message) error {
 	switch code {
-	case BalanceStatusCode:
-		color.Println("@{b}Contacting bank... Please wait")
+	case Protocol.BalanceStatusCode:
+		color.Println("@{b}Contacting bank... Please wait.")
 		message := &Protocol.Message{
-			Code: BalanceStatusCode,
+			Code: Protocol.BalanceStatusCode,
 		}
 		writeCh <- message
 		response := <-readCh
-		if response.Code == responseOK {
-			color.Println("@{gB}\nYour balance:")
+		color.Printf("@{g}Your balance: %d\n", response.Payload)
+	case Protocol.WithdrawStatusCode:
+		color.Println("@{b}Please input your scratch code")
+		fmt.Print(prompt)
+		numString := <-input
+		if Protocol.ScratchTest.MatchString(numString) {
+			num, _ := strconv.Atoi(numString)
+			if num%2 == 1 {
+				color.Println("@{b}Please input the amount of money that you want to widthdraw.")
+				fmt.Print(prompt)
+				moneyString := <-input
+				if Protocol.MoneyTest.MatchString(moneyString) {
+					money, _ := strconv.Atoi(moneyString)
+					message := &Protocol.Message{
+						Code:    Protocol.WithdrawStatusCode,
+						Payload: uint16(money),
+					}
+					color.Println("@{b}Contacting bank... Please wait.")
+					writeCh <- message
+					response := <-readCh
+					if response.Code == Protocol.ResponseOK {
+						color.Println("@{b}Status : @{g}OK")
+					} else if response.Code == Protocol.ResponseMoneyProblem {
+						color.Println("@{b}Status : @{r}Error:The amount of money was bigger than your balance.")
+					}
+				} else {
+					return errors.New("Not a number!")
+				}
+			} else {
+				return errors.New("Invalid scratch code.")
+			}
+		} else {
+			return errors.New("Not a number!")
 		}
-	case WithdrawStatusCode:
-		fmt.Println("Getting money from bank")
-	case DepositStatusCode:
-		fmt.Println("Input money to bank")
+	case Protocol.DepositStatusCode:
+		color.Println("@{b}Please input the amount of money that you want to deposit.")
+		fmt.Print(prompt)
+		inputString := <-input
+		if Protocol.MoneyTest.MatchString(inputString) {
+			money, _ := strconv.Atoi(inputString)
+			message := &Protocol.Message{
+				Code:    Protocol.DepositStatusCode,
+				Payload: uint16(money),
+			}
+			color.Println("@{b}Contacting bank... Please wait.")
+			writeCh <- message
+			<-readCh //wait for the response.
+			color.Println("@{b}Status : @{g}OK")
+		} else {
+			return errors.New("Not a number!")
+		}
 	default:
-		return errors.New("Unkown code")
+		return errors.New("Unkown code.")
 	}
 	return nil
 }
@@ -286,7 +307,7 @@ func login(input chan string, writeCh, readCh chan *Protocol.Message) error {
 		color.Println("@{gB}Input password.")
 		fmt.Print(prompt)
 		passNum = <-input
-		if cardnumberTest.MatchString(cardNum) && passnumberTest.MatchString(passNum) {
+		if Protocol.CardnumberTest.MatchString(cardNum) && Protocol.PassnumberTest.MatchString(passNum) {
 			break
 		} else {
 			color.Println("@{r}\nInvalid credentials. Please try again.")
@@ -297,18 +318,18 @@ func login(input chan string, writeCh, readCh chan *Protocol.Message) error {
 	pass, _ := strconv.Atoi(passNum)
 
 	message := &Protocol.Message{
-		Code:    loginStatusCode,
+		Code:    Protocol.LoginStatusCode,
 		Number:  uint16(card),
 		Payload: uint16(pass),
 	}
-	writeCh <- message //send message from server.
-	answer := <-readCh //read answer from server.
-	if answer.Code == responseNotAccepted {
+	writeCh <- message   //send message from server.
+	response := <-readCh //read answer from server.
+	if response.Code == Protocol.ResponseNotAccepted {
 		return errors.New("You were not accepted")
-	} else if answer.Code == responseAlreadyLoggedIn {
+	} else if response.Code == Protocol.ResponseAlreadyLoggedIn {
 		return errors.New("Already logged in")
 	}
-	color.Println("@{gB}\nYou were granted access.")
+	color.Printf("@{gB}You were granted access.")
 	return nil
 }
 
@@ -322,7 +343,7 @@ func cleanUp(c chan os.Signal, conn *net.Conn) {
 //Convinience function.
 func checkError(err error) {
 	if err != nil {
-		color.Printf("@{r}Fatal error: %s", err.Error())
+		color.Printf("@{r}Fatal error: %s\n", err.Error())
 		os.Exit(1)
 	}
 }
