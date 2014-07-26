@@ -20,11 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/*
-	TODO:
-	Remove clients when they disconnect.
-*/
-
 package main
 
 import (
@@ -88,7 +83,7 @@ type Transaction struct {
 
 func (s *server) getCardNumber(conn *net.Conn) uint16 {
 	s.mutex.Lock()
-	s.mutex.Unlock()
+	defer s.mutex.Unlock()
 	return s.loggedInclients[conn]
 }
 
@@ -119,7 +114,7 @@ func main() {
 	server := &server{
 		mutex: new(sync.Mutex),
 
-		//A fake vault.
+		//A fake vault. cardnumber -> balance
 		money: map[uint16]uint16{
 			1234: 100,
 			1123: 500,
@@ -129,7 +124,10 @@ func main() {
 		balanceCh:       make(chan Transaction, numberOfMessages),
 		withdrawCh:      make(chan Transaction, numberOfMessages),
 		depositCh:       make(chan Transaction, numberOfMessages),
-		//A list of fictional users, for demonstration purposes.
+		/*
+			A list of fictional users, for demonstration purposes.
+			cardnumber -> pin code
+		*/
 		FictionalUsers: map[uint16]uint16{
 			1234: 12,
 			1123: 13,
@@ -138,6 +136,7 @@ func main() {
 	/* handels os.Interrupt, and closes every connected client,
 	and then closes the program.*/
 	go server.cleanUp(c)
+	//start the virtual banker.
 	go server.banker(server.balanceCh, server.withdrawCh, server.depositCh)
 
 	var address string                           //holds the address to the server.
@@ -162,7 +161,7 @@ func main() {
 			color.Printf("@{r}%s", err.Error())
 			continue
 		}
-		server.addConnection(&conn)
+		server.addConnection(&conn)        //add the current connection to map.
 		go server.connectionHandler(&conn) //connection handler for every new connection.
 	}
 }
@@ -207,7 +206,8 @@ func (s *server) connectionHandler(conn *net.Conn) {
 	s.removeConnection(conn)
 }
 
-/*	This function acts as an banker in the virtual bank. This function is the only one that can
+/*
+	This function acts as an banker in the virtual bank. This function is the only one that can
 	access the important datastructures.
 */
 func (s *server) banker(balanceCh, withdrawCh, depositCh chan Transaction) {
@@ -259,12 +259,12 @@ func (s *server) setLogin(conn *net.Conn, number uint16) {
 func (s *server) isLoggedIn(conn *net.Conn) bool {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	if s.loggedInclients[conn] != 0 {
+	if s.loggedInclients[conn] != 0 { //zero is the default value.
 		return true
 	} else {
 		return false
 	}
-	return false
+	return false //the client could not be found.
 }
 
 func (s *server) isAccepted(card, pass uint16) bool {
@@ -342,7 +342,7 @@ Outer:
 						color.Printf("@{g}Client with IP %s tried to log in with wrong credentials\n", ip)
 					}
 				}
-			case 2: //logout
+			case Protocol.LogoutStatusCode: //logout
 				color.Printf("@{g}User with IP %s are trying to logout\n", ip)
 				//is the user already logged out?
 				if !s.isLoggedIn(conn) {
@@ -352,7 +352,7 @@ Outer:
 				} else {
 					s.setLogin(conn, message.Number)
 				}
-			case 3: //deposit
+			case Protocol.DepositStatusCode: //deposit
 				s.depositCh <- Transaction{
 					Money: message.Payload,
 					ID:    s.getCardNumber(conn),
@@ -363,7 +363,7 @@ Outer:
 						write <- message
 					},
 				}
-			case 4: //withdraw
+			case Protocol.WithdrawStatusCode: //withdraw
 				s.withdrawCh <- Transaction{
 					Money: message.Payload,
 					ID:    s.getCardNumber(conn),
@@ -374,7 +374,7 @@ Outer:
 						write <- message
 					},
 				}
-			case 5: //balance
+			case Protocol.BalanceStatusCode: //balance
 				s.balanceCh <- Transaction{
 					ID: s.getCardNumber(conn),
 					Done: func(err error, message *Protocol.Message) {

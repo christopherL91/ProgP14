@@ -36,6 +36,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -63,6 +64,7 @@ func init() {
 	//For configurations.
 	flag.StringVar(&configPath, "config", "client.gcfg", "Path to config file")
 	flag.Parse()
+	runtime.GOMAXPROCS(runtime.NumCPU()) //Use maximal number of cores.
 }
 
 func main() {
